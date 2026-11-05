@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>팔당호 수온 예측</title>
+  <meta name="description" content="팔당호 조사 수역의 수온을 상류 전일 수온·위치·계절로 추정하는 CatBoost 모형(E2-A)의 예측 대시보드">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@500&display=swap">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <main class="pw" id="top">
+    <header class="pw-head">
+      <p class="pw-eyebrow">팔당호 수온·EC 시공간 추정 · 26-2 캡스톤디자인</p>
+      <h1 class="pw-title">팔당호 수온 예측</h1>
+      <p class="pw-take">학습에 쓰지 않은 최종시험 기간에 E2-A CatBoost(상류 전일 수온 + 위치·계절·시각)의 균형 RMSE는 <b data-src="scores" data-field="rmse" data-where="stage=최종시험&amp;model=E2-A" data-fmt="2">—</b> °C, 기준 GAM은 <b data-src="scores" data-field="rmse" data-where="stage=최종시험&amp;model=E0-3" data-fmt="2">—</b> °C였다. 차이의 재표집 95% 구간이 0을 포함해, 우열은 조사일이 더 쌓여야 확정된다.</p>
+      <p class="pw-error" id="pw-error" hidden></p>
+    </header>
+
+    <section class="pw-tiles" aria-label="모형 점수">
+      <div class="pw-tile">
+        <span class="pw-tile-label">최종시험 균형 RMSE · E2-A</span>
+        <span class="pw-tile-value"><span data-src="scores" data-field="rmse" data-where="stage=최종시험&amp;model=E2-A" data-fmt="2">—</span> °C</span>
+        <span class="pw-tile-sub">GAM <span data-src="scores" data-field="rmse" data-where="stage=최종시험&amp;model=E0-3" data-fmt="2">—</span> °C · R² <span data-src="scores" data-field="r2" data-where="stage=최종시험&amp;model=E2-A" data-fmt="3">—</span></span>
+      </div>
+      <div class="pw-tile">
+        <span class="pw-tile-label">GAM 대비 차이 · 최종시험</span>
+        <span class="pw-tile-value"><span data-src="test_diff" data-field="diff" data-row="0" data-fmt="s2">—</span> °C</span>
+        <span class="pw-tile-sub">95% 구간 <span data-src="test_diff" data-field="lo" data-row="0" data-fmt="s2">—</span> ~ <span data-src="test_diff" data-field="hi" data-row="0" data-fmt="s2">—</span> · P(개선) <span data-src="test_diff" data-field="p_better" data-row="0" data-fmt="2">—</span></span>
+      </div>
+      <div class="pw-tile">
+        <span class="pw-tile-label">개발검증 균형 RMSE · E2-A</span>
+        <span class="pw-tile-value"><span data-src="scores" data-field="rmse" data-where="stage=개발검증&amp;model=E2-A" data-fmt="2">—</span> °C</span>
+        <span class="pw-tile-sub">GAM <span data-src="scores" data-field="rmse" data-where="stage=개발검증&amp;model=E0-3" data-fmt="2">—</span> °C</span>
+      </div>
+      <div class="pw-tile">
+        <span class="pw-tile-label">조사일 제외 검증(LOSO) 평균 · E2-A</span>
+        <span class="pw-tile-value"><span data-src="scores" data-field="rmse" data-where="stage=LOSO 평균&amp;model=E2-A" data-fmt="2">—</span> °C</span>
+        <span class="pw-tile-sub">GAM <span data-src="scores" data-field="rmse" data-where="stage=LOSO 평균&amp;model=E0-3" data-fmt="2">—</span> °C</span>
+      </div>
+    </section>
+
+    <section class="pw-card" id="map">
+      <div class="pw-cardhead">
+        <h2>날짜별 예측 수온 지도</h2>
+        <p class="pw-note">최종 모형 E2-A로 조사 수역 안 100 m 격자마다 09~17시 매시 예측을 계산해 평균했다. 날짜를 바꾸면 브라우저에서 모형을 바로 계산한다.<span id="pw-note-field" hidden> 조사일에는 오른쪽에 수표면 관측(100 m 셀 평균)을 같은 색 범위로 보인다.</span></p>
+      </div>
+      <div class="pw-controls">
+        <button type="button" class="pw-step" data-step="-1" aria-label="전날">‹</button>
+        <input type="date" id="pw-date" aria-label="날짜">
+        <button type="button" class="pw-step" data-step="1" aria-label="다음 날">›</button>
+        <select id="pw-survey" aria-label="조사일로 이동"></select>
+      </div>
+      <div class="pw-chips">
+        <span class="pw-chip" data-stage="개발학습" hidden>최종 모형 학습 기간 · 개발학습</span>
+        <span class="pw-chip" data-stage="개발검증" hidden>최종 모형 학습 기간 · 개발검증</span>
+        <span class="pw-chip pw-chip-test" data-stage="최종시험" hidden>최종시험 기간 · 학습에 쓰지 않은 날짜</span>
+        <span class="pw-chip pw-chip-warn" id="pw-missing" hidden>상류 전일 수온 결측 <b data-src="daily" data-field="missing_inputs" data-tmpl="date={date}" data-fmt="0">—</b>개 · 결측 입력은 가장 낮은 값처럼 처리돼 예측을 믿기 어렵다</span>
+      </div>
+      <div class="pw-stats">
+        <div class="pw-stat"><span>호 평균 예측</span><b><span data-src="daily" data-field="pred_mean" data-tmpl="date={date}" data-fmt="1">—</span> °C</b></div>
+        <div class="pw-stat"><span>격자 최저 ~ 최고</span><b><span data-src="daily" data-field="pred_min" data-tmpl="date={date}" data-fmt="1">—</span> ~ <span data-src="daily" data-field="pred_max" data-tmpl="date={date}" data-fmt="1">—</span> °C</b></div>
+        <div class="pw-stat"><span>북한강(가평) 전일 수온</span><b><span data-src="daily" data-field="up_bukhan" data-tmpl="date={date}" data-fmt="1">—</span> °C</b></div>
+        <div class="pw-stat"><span>남한강(양평) 전일 수온</span><b><span data-src="daily" data-field="up_namhan" data-tmpl="date={date}" data-fmt="1">—</span> °C</b></div>
+        <div class="pw-stat"><span>경안천 전일 수온</span><b><span data-src="daily" data-field="up_gyeongan" data-tmpl="date={date}" data-fmt="1">—</span> °C</b></div>
+      </div>
+      <div class="pw-maps" id="pw-maps">
+        <figure class="pw-mapfig">
+          <figcaption>예측 · 09~17시 평균</figcaption>
+          <div class="pw-map" id="pw-map-pred"></div>
+        </figure>
+        <figure class="pw-mapfig" id="pw-obs-fig" hidden>
+          <figcaption>관측 · 수표면 100 m 셀 평균</figcaption>
+          <div class="pw-map" id="pw-map-obs" hidden></div>
+          <p class="pw-empty" id="pw-obs-none">이 날짜에는 수표면 조사가 없다. 위 목록에서 조사일을 고르면 관측과 나란히 볼 수 있다.</p>
+        </figure>
+      </div>
+      <div class="pw-legend" id="pw-legend"></div>
+    </section>
+
+    <section class="pw-card" id="stations">
+      <div class="pw-cardhead">
+        <h2>측정망 지점: 예측과 관측</h2>
+        <p class="pw-note">선은 그 지점의 09~17시 평균 예측, 점은 측정망 관측(그날 여러 수층의 평균)이다. 상류 전일 수온이 빠진 날은 선을 끊었다. 그래프를 누르면 지도가 그 날짜로 바뀐다.</p>
+      </div>
+      <div class="pw-controls">
+        <select id="pw-site" aria-label="측정망 지점"></select>
+      </div>
+      <div class="pw-key">
+        <span><i class="pw-sw pw-sw-line"></i>예측(09~17시 평균)</span>
+        <span><i class="pw-sw pw-sw-dot"></i>관측(층 평균)</span>
+        <span><i class="pw-sw pw-sw-band"></i>최종 모형 학습 기간</span>
+      </div>
+      <div class="pw-chart" id="pw-station-chart"></div>
+      <div class="pw-stats">
+        <div class="pw-stat"><span>최종시험 기간 RMSE · 관측 시각 예측</span><b><span data-src="station_errors" data-field="rmse" data-tmpl="site={site}&amp;period=최종시험" data-fmt="2">—</span> °C</b></div>
+        <div class="pw-stat"><span>최종시험 기간 평균 편향</span><b><span data-src="station_errors" data-field="bias" data-tmpl="site={site}&amp;period=최종시험" data-fmt="s2">—</span> °C</b></div>
+        <div class="pw-stat"><span>최종시험 기간 관측일</span><b><span data-src="station_errors" data-field="days" data-tmpl="site={site}&amp;period=최종시험" data-fmt="0">—</span>일</b></div>
+        <div class="pw-stat"><span>학습 기간 RMSE(적합값)</span><b><span data-src="station_errors" data-field="rmse" data-tmpl="site={site}&amp;period=학습 기간" data-fmt="2">—</span> °C</b></div>
+      </div>
+    </section>
+
+    <section class="pw-card" id="surveys">
+      <div class="pw-cardhead">
+        <h2>조사일별 오차: 학습에 안 쓴 조사일 기준</h2>
+        <p class="pw-note">1~14차는 그 조사일을 빼고 학습한 조사일 제외 검증(LOSO), 15~18차는 최종시험이다. 막대를 누르면 지도가 그 조사일로 바뀐다.</p>
+      </div>
+      <div class="pw-key">
+        <span><i class="pw-sw pw-sw-e2a"></i>E2-A CatBoost</span>
+        <span><i class="pw-sw pw-sw-gam"></i>E0-3 GAM</span>
+      </div>
+      <div class="pw-chart" id="pw-survey-chart"></div>
+    </section>
+
+
+    <section class="pw-card" id="models">
+      <div class="pw-cardhead">
+        <h2>모형별 성능 비교</h2>
+        <p class="pw-note">개발검증(12~14차), 조사일 제외 검증(LOSO, 1~14차), 최종시험(15~18차)의 균형 점수다. 최종시험은 설계대로 최종 후보 E2-A와 기준모형 E0만 한 번 채점했다. 학습집합은 결측을 그대로 둔 전체 가용 집합과, 입력 38개가 모두 있는 행만 쓴 공통 완전사례로 나뉜다. 랜덤포레스트는 결측을 다루지 못해 공통 완전사례에서만 학습했다.</p>
+      </div>
+      <div class="pw-controls">
+        <div class="pw-seg" role="group" aria-label="목표 변수">
+          <button type="button" data-target="Temp" aria-pressed="true">수온 (°C)</button>
+          <button type="button" data-target="EC" aria-pressed="false">EC (μS/cm)</button>
+        </div>
+      </div>
+      <div class="pw-tablewrap">
+        <table class="pw-table" id="pw-model-table">
+          <thead>
+            <tr class="pw-th-group">
+              <th rowspan="2" scope="col" class="pw-l pw-stick">모형 · 입력</th>
+              <th colspan="5" scope="colgroup" class="pw-gsep">개발검증 · 12~14차</th>
+              <th colspan="2" scope="colgroup" class="pw-gsep">LOSO · 1~14차</th>
+              <th colspan="4" scope="colgroup" class="pw-gsep">최종시험 · 15~18차</th>
+              <th rowspan="2" scope="col" class="pw-l pw-gsep">설정</th>
+            </tr>
+            <tr>
+              <th scope="col" class="pw-gsep">RMSE</th><th scope="col">MAE</th><th scope="col">R²</th><th scope="col">편향</th><th scope="col">GAM 대비 [95% 구간]</th>
+              <th scope="col" class="pw-gsep">평균 RMSE</th><th scope="col">GAM보다 나은 날</th>
+              <th scope="col" class="pw-gsep">RMSE</th><th scope="col">R²</th><th scope="col">편향</th><th scope="col">GAM 대비 [95% 구간]</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="pw-note">굵은 값은 학습집합마다 가장 낮은 RMSE. GAM 대비 값이 <span class="pw-good">초록</span>이면 95% 구간이 0 아래(GAM보다 확실히 좋음), <span class="pw-badc">빨강</span>이면 0 위(확실히 나쁨)다. 「—」는 실행하지 않은 검증이다. 위쪽 E2-A 비교 행은 E2-D와 같은 반복 수로 학습한 값이고, 「E2-A 최종」은 자체 반복 수로 다시 정한 최종 후보다.</p>
+      <p class="pw-note" id="pw-ec-note" hidden>EC는 기계학습의 개선 폭이 재표집 구간 안에 있고 LOSO 평균도 GAM과 비슷해, 최종시험을 하지 않고 E4(혼합 지표) 검토로 넘겼다.</p>
+      <div class="pw-cardhead pw-subhead">
+        <h3>개발검증: GAM 대비 균형 RMSE 차이</h3>
+        <p class="pw-note">기계학습 모형만 그렸다(평균형 기준모형은 표 참고). 점은 차이, 가로선은 조사일 재표집 95% 구간이다. 왼쪽(음수)일수록 GAM보다 오차가 작다.</p>
+      </div>
+      <div class="pw-chart pw-chart-short" id="pw-forest"></div>
+    </section>
+
+    <div class="pw-grid4" id="model-cards">
+      <section class="pw-card pw-mcard">
+        <h3><b>E0</b> 기준모형</h3>
+        <p>평균형 세 가지(전체 평균, 계절 평균, 100 m 셀×계절 평균)와 GAM(위치 s(x, y) + 연중일·시각 주기). 외부 입력을 쓰지 않는다.</p>
+        <p class="pw-mrole">GAM(E0-3)이 이후 모든 비교의 기준선이다.</p>
+      </section>
+      <section class="pw-card pw-mcard">
+        <h3><b>E1</b> 랜덤포레스트</h3>
+        <p>입력 38개(F4). 결측을 다루지 못해 공통 완전사례에서만 학습했다(1·4·9·10차 제외). 나무 300그루, 최대 깊이 8, 잎 최소 20.</p>
+        <p class="pw-mrole">수온·EC 모두 GAM과의 차이가 확실하지 않아 다음 단계로 가져가지 않았다.</p>
+      </section>
+      <section class="pw-card pw-mcard">
+        <h3><b>E2</b> CatBoost</h3>
+        <p>입력을 A(상류 전일 9개) → B(+유량) → C(+기상) → D(+3·7일 창)로 늘려 정보원별 기여를 나눴다. 결측을 그대로 다룬다.</p>
+        <p class="pw-mrole">수온은 A가 가장 좋아, 반복 수를 다시 정한 뒤 최종 후보로 최종시험을 했다.</p>
+      </section>
+      <section class="pw-card pw-mcard">
+        <h3><b>E3</b> LightGBM</h3>
+        <p>입력 38개(F4), 결측을 그대로 다룬다. 최대 깊이 4, 잎 15, 잎 최소 100.</p>
+        <p class="pw-mrole">수온 개발검증은 E2-A와 비슷했지만 LOSO에서 더 나빴다. EC는 개발검증에서 가장 낮았지만 구간이 0을 포함했다.</p>
+      </section>
+    </div>
+
+    <section class="pw-card" id="metrics">
+      <div class="pw-cardhead"><h2>지표 설명</h2></div>
+      <dl class="pw-defs pw-defs-wide">
+        <dt>균형 RMSE</dt><dd>측정망·수표면·연직 세 출처를 같은 비중으로, 출처 안에서는 날짜를, 날짜 안에서는 100 m 셀·지점을 같은 비중으로 둔 제곱근 평균 제곱 오차. 행이 많은 수표면 계측이 점수를 지배하지 않게 한다.</dd>
+        <dt>MAE</dt><dd>같은 가중을 둔 평균 절대 오차.</dd>
+        <dt>R²</dt><dd>같은 가중으로 계산한 결정계수. 1에 가까울수록 좋고, 음수면 평가 자료의 평균값 하나로 예측하는 것보다 못하다.</dd>
+        <dt>편향</dt><dd>예측 − 관측의 가중 평균. 음수면 낮게 예측한다.</dd>
+        <dt>GAM 대비 [95% 구간]</dt><dd>모형 RMSE − GAM RMSE. 현장 조사일과 측정망 날짜를 2,000번 복원추출해 구간을 구했다.</dd>
+        <dt>LOSO</dt><dd>1~14차 중 한 조사일을 빼고 학습한 뒤 그 날을 예측한 RMSE의 평균과, GAM보다 오차가 작았던 조사일 수.</dd>
+      </dl>
+    </section>
+
+    <div class="pw-grid2" id="model">
+      <section class="pw-card">
+        <div class="pw-cardhead">
+          <h2>입력별 중요도</h2>
+          <p class="pw-note">최종 모형의 CatBoost 내장 중요도(%). 상류 세 하천의 전일 수온이 날짜별 수준을, 연중일이 계절 위상을 맡는다.</p>
+        </div>
+        <div class="pw-chart pw-chart-short" id="pw-importance"></div>
+      </section>
+      <section class="pw-card">
+        <div class="pw-cardhead">
+          <h2>모형과 읽을 때 주의</h2>
+        </div>
+        <dl class="pw-defs">
+          <dt>알고리즘</dt><dd>CatBoost 회귀 · 깊이 <span data-src="model_info" data-field="depth" data-row="0" data-fmt="0">—</span> · l2 <span data-src="model_info" data-field="l2" data-row="0" data-fmt="0">—</span> · 나무 <span data-src="model_info" data-field="trees" data-row="0" data-fmt=",">—</span>그루</dd>
+          <dt>학습 자료</dt><dd><span data-src="model_info" data-field="train_rows" data-row="0" data-fmt=",">—</span>행 · <span data-src="model_info" data-field="train_end" data-row="0" data-fmt="text">—</span>까지(개발학습 + 개발검증)</dd>
+          <dt>최종시험 자료</dt><dd><span data-src="model_info" data-field="test_rows" data-row="0" data-fmt=",">—</span>행 · 한 번만 예측해 채점</dd>
+          <dt>자료 생성일</dt><dd><span data-src="model_info" data-field="built_at" data-row="0" data-fmt="text">—</span></dd>
+        </dl>
+        <ul class="pw-list">
+          <li>학습 기간 날짜의 지도와 측정망 선은 학습 자료에 맞춘 값이라 실제 성능보다 좋아 보인다. 성능은 위의 LOSO와 최종시험 점수로 본다.</li>
+          <li>시각 입력은 조사선이 시간대별로 다른 구역을 지난 영향이 섞여 학습돼, 시간대별 예측이 들쭉날쭉하다. 그래서 지도와 선은 09~17시 매시 예측의 평균으로 보인다.</li>
+          <li>모형은 수심을 입력으로 쓰지 않는다. 수표면·연직·측정망 자료를 함께 학습해 여름 수표면은 낮게 예측하는 경향이 있다.</li>
+          <li>EC는 최종 모형이 아직 없어(E4 진행 전) 넣지 않았다.</li>
+        </ul>
+      </section>
+    </div>
+
+    <footer class="pw-foot">
+      <p id="pw-foot-full" hidden>자료: 팔당호 현장 수표면·연직 계측(1~18차), 팔당호 수질측정망, 한강 수질자동측정망(가평·양평·경안천). 조사 수역은 polygon.shp, 좌표는 UTM 52N. 자료는 <code>scripts/build_data.py</code>로 다시 만든다.</p>
+      <p id="pw-foot-public">공개용: 현장 수표면·연직 계측 원자료는 싣지 않았다. 모형과 점수는 현장 계측(1~18차)으로 만든 결과이고, 그래프의 관측은 팔당호 수질측정망, 모형 입력은 한강 수질자동측정망(가평·양평·경안천) 값이다. 조사 수역 경계와 좌표는 UTM 52N. 자료는 <code>scripts/build_data.py --public</code>으로 다시 만든다.</p>
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
