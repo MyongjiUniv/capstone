@@ -1,0 +1,1 @@
+[{"scale":1,"bias":16.05673599243164,"features":"x,y,doy_sin,doy_cos,tod_sin,tod_cos,Tup_bukhan_d1,Tup_namhan_d1,Tup_gyeongan_d1","hour_from":9,"hour_to":17,"trees":1000,"depth":4,"l2":5,"train_rows":361655,"train_end":"2025-04-18","test_rows":70289,"built_at":"2026-11-05","field_cells":false}]
